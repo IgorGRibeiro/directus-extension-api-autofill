@@ -20,12 +20,21 @@ export default defineEndpoint({
           .json({ error: { code: 'NOT_CONFIGURED', message: 'collection, field and value are required.' } });
       }
 
+      let schema;
+      try {
+        schema = await getSchema();
+      } catch (err: any) {
+        return res
+          .status(500)
+          .json({ error: { code: 'INTERNAL_ERROR', message: err?.message ?? 'Failed to load schema.' } });
+      }
+
       // Load the field under the requester's accountability: no more reach than the user has.
       let fieldEntry: any;
       try {
         const { FieldsService } = services;
         const fieldsService = new FieldsService({
-          schema: await getSchema(),
+          schema,
           accountability: req.accountability,
         });
         fieldEntry = await fieldsService.readOne(collection, field);

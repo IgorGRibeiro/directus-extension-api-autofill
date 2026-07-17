@@ -1,0 +1,60 @@
+{
+  "name": "@ribertec/directus-extension-api-autofill",
+  "description": "General-purpose API autofill interface for Directus: query an external HTTP API on input and fill sibling fields via a source-to-target mapping.",
+  "version": "1.0.0",
+  "license": "MIT",
+  "author": "@ribertec",
+  "icon": "sync",
+  "keywords": [
+    "directus",
+    "directus-extension",
+    "directus-extension-bundle",
+    "autofill",
+    "api",
+    "lookup"
+  ],
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "directus:extension": {
+    "type": "bundle",
+    "path": {
+      "app": "dist/app.js",
+      "api": "dist/api.js"
+    },
+    "entries": [
+      {
+        "type": "interface",
+        "name": "api-autofill-input",
+        "source": "src/api-autofill-input/index.ts"
+      },
+      {
+        "type": "endpoint",
+        "name": "api-autofill",
+        "source": "src/api-autofill/index.ts"
+      }
+    ],
+    "host": "^11.0.0"
+  },
+  "scripts": {
+    "build": "directus-extension build",
+    "dev": "directus-extension build -w --no-minify",
+    "link": "directus-extension link",
+    "validate": "directus-extension validate",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "translate": "node --env-file=.env scripts/generate-translations.js"
+  },
+  "dependencies": {
+    "vue-i18n": "^11.2.8"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@directus/extensions-sdk": "^17.0.9",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.18",
+    "vue": "^3.5.27"
+  }
+}

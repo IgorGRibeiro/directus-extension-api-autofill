@@ -75,8 +75,9 @@ async function runSearch(value: string): Promise<void> {
     for (const update of updates) {
       emit('setFieldValue', update);
     }
-  } catch {
-    errorMessage.value = t('search_error');
+  } catch (err: any) {
+    const code = err?.response?.data?.error?.code;
+    errorMessage.value = code === 'NOT_CONFIGURED' ? t('not_configured') : t('search_error');
   } finally {
     isSearching.value = false;
   }

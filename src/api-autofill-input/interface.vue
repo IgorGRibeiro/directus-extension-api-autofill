@@ -13,7 +13,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onBeforeUnmount } from 'vue';
+import { ref, onBeforeUnmount, nextTick } from 'vue';
 import { useApi } from '@directus/extensions-sdk';
 import { shouldSearch } from '../utils/trigger.js';
 import { resolveMappings, type Mapping } from '../utils/apply-mappings.js';
@@ -72,8 +72,13 @@ async function runSearch(value: string): Promise<void> {
     });
     lastSearched.value = value;
     const updates = resolveMappings(response.data?.data, props.mappings ?? []);
+    // Emit sibling-field updates one tick apart. Directus's v-form merges each
+    // setFieldValue onto the current modelValue prop, which only refreshes on
+    // re-render — emitting them synchronously would let the last write clobber
+    // the earlier ones, so yield a tick between emits to let each propagate.
     for (const update of updates) {
       emit('setFieldValue', update);
+      await nextTick();
     }
   } catch (err: any) {
     const code = err?.response?.data?.error?.code;

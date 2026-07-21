@@ -1,39 +1,51 @@
 import { describe, it, expect } from 'vitest';
 import { buildRequest } from './request-builder.js';
-import { MissingEnvError } from './template.js';
+import { TemplateError } from './liquid.js';
 
 describe('buildRequest', () => {
-  it('builds a GET with an encoded value in the URL and no body', () => {
-    const result = buildRequest({ url: 'https://x/y?q={{value}}', method: 'GET' }, 'a b', {});
-    expect(result).toEqual({ url: 'https://x/y?q=a%20b', method: 'GET', headers: {}, body: undefined });
+  it('renders the URL without implicit encoding', async () => {
+    const result = await buildRequest({ url: 'https://x/y?q={{ value }}', method: 'GET' }, 'a/b', {});
+    expect(result.url).toBe('https://x/y?q=a/b');
+    expect(result.method).toBe('GET');
+    expect(result.body).toBeUndefined();
   });
 
-  it('defaults the method to GET when omitted', () => {
-    expect(buildRequest({ url: 'https://x' }, 'v', {}).method).toBe('GET');
+  it('encodes the value in the URL when url_encode is used', async () => {
+    const result = await buildRequest(
+      { url: 'https://x/y?q={{ value | url_encode }}', method: 'GET' },
+      'a/b',
+      {},
+    );
+    expect(result.url).toBe('https://x/y?q=a%2Fb');
   });
 
-  it('builds a POST with a substituted body and default Content-Type', () => {
-    const result = buildRequest(
-      { url: 'https://x', method: 'POST', body: '{"q":"{{value}}"}' },
-      'hi',
+  it('defaults the method to GET when omitted', async () => {
+    const result = await buildRequest({ url: 'https://x' }, 'v', {});
+    expect(result.method).toBe('GET');
+  });
+
+  it('builds a POST body with the json filter and default Content-Type', async () => {
+    const result = await buildRequest(
+      { url: 'https://x', method: 'POST', body: '{"q": {{ value | json }}}' },
+      'he "said"',
       {},
     );
     expect(result.method).toBe('POST');
-    expect(result.body).toBe('{"q":"hi"}');
+    expect(JSON.parse(result.body as string)).toEqual({ q: 'he "said"' });
     expect(result.headers['Content-Type']).toBe('application/json');
   });
 
-  it('resolves env references in header values', () => {
-    const result = buildRequest(
-      { url: 'https://x', headers: [{ name: 'Authorization', value: 'Bearer {{env.TOKEN}}' }] },
+  it('resolves env references in header values', async () => {
+    const result = await buildRequest(
+      { url: 'https://x', headers: [{ name: 'Authorization', value: 'Bearer {{ env.TOKEN }}' }] },
       'v',
       { TOKEN: 't' },
     );
     expect(result.headers.Authorization).toBe('Bearer t');
   });
 
-  it('does not override a supplied Content-Type header for POST bodies', () => {
-    const result = buildRequest(
+  it('does not override a supplied Content-Type header for POST bodies', async () => {
+    const result = await buildRequest(
       {
         url: 'https://x',
         method: 'POST',
@@ -47,9 +59,12 @@ describe('buildRequest', () => {
     expect(result.headers['Content-Type']).toBeUndefined();
   });
 
-  it('throws MissingEnvError when a header references an unset variable', () => {
-    expect(() =>
-      buildRequest({ url: 'https://x', headers: [{ name: 'Authorization', value: '{{env.NOPE}}' }] }, 'v', {}),
-    ).toThrow(MissingEnvError);
+  it('throws TemplateError when a header references an unset env variable', async () => {
+    const err = await buildRequest(
+      { url: 'https://x', headers: [{ name: 'Authorization', value: '{{ env.NOPE }}' }] },
+      'v',
+      {},
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(TemplateError);
   });
 });

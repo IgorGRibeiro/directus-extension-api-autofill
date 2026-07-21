@@ -1,4 +1,4 @@
-import { substituteValue, resolveEnv } from './template.js';
+import { renderTemplate, type EnvRecord, type TemplateScope } from './liquid.js';
 
 export interface AutofillOptions {
   url: string;
@@ -14,26 +14,27 @@ export interface BuiltRequest {
   body?: string;
 }
 
-export function buildRequest(
+export async function buildRequest(
   options: AutofillOptions,
   value: string,
-  env: Record<string, string | undefined>,
-): BuiltRequest {
+  env: EnvRecord,
+): Promise<BuiltRequest> {
   const method: 'GET' | 'POST' = options.method === 'POST' ? 'POST' : 'GET';
+  const scope: TemplateScope = { value, env };
 
-  const url = resolveEnv(substituteValue(options.url, value, { encode: true }), env);
+  const url = await renderTemplate(options.url, scope);
 
   const headers: Record<string, string> = {};
   let hasContentType = false;
   for (const header of options.headers ?? []) {
     if (!header?.name) continue;
-    headers[header.name] = resolveEnv(substituteValue(header.value ?? '', value), env);
+    headers[header.name] = await renderTemplate(header.value ?? '', scope);
     if (header.name.toLowerCase() === 'content-type') hasContentType = true;
   }
 
   let body: string | undefined;
   if (method === 'POST' && options.body) {
-    body = substituteValue(options.body, value);
+    body = await renderTemplate(options.body, scope);
     if (!hasContentType) headers['Content-Type'] = 'application/json';
   }
 

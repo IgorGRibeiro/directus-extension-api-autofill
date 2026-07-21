@@ -47,6 +47,7 @@
     "translate": "node --env-file=.env scripts/generate-translations.js"
   },
   "dependencies": {
+    "liquidjs": "^10.27.2",
     "vue-i18n": "^11.2.8"
   },
   "devDependencies": {

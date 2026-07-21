@@ -4,7 +4,7 @@
 
 **Goal:** Replace the fixed `{{value}}`/`{{env.VAR}}` substitution engine with LiquidJS so the outbound request's URL, headers, and body can be transformed with Liquid filters.
 
-**Architecture:** A single server-side LiquidJS engine (strict mode) renders each request surface against a `{ value, env }` scope. A new `liquid.ts` util owns the engine and a `renderTemplate` helper; `request-builder.ts` becomes async and calls it for URL/headers/body; the endpoint awaits it and maps undefined-variable failures to `NOT_CONFIGURED`. The old `template.ts` is deleted. No client/app-bundle changes — LiquidJS ships only in `dist/api.js`.
+**Architecture:** A single server-side LiquidJS engine (strict mode) renders each request surface against a `{ value, env }` scope. A new `liquid.ts` util owns the engine and a `renderTemplate` helper; `request-builder.ts` becomes async and calls it for URL/headers/body; the endpoint awaits it and maps undefined-variable failures to `NOT_CONFIGURED`. The old `template.ts` is deleted. Task 4 adds response-side templating: a second lenient, synchronous engine renders a field mapping's source when it looks like a Liquid template — so LiquidJS ships in both `dist/api.js` and `dist/app.js`.
 
 **Tech Stack:** TypeScript, ES modules, Vue 3 (unchanged here), Directus Extensions SDK, LiquidJS, Vitest.
 
@@ -15,7 +15,8 @@
 - **Template scope:** exactly `{ value, env }` — `value` is the typed string, `env` is the server env record.
 - **Undefined variable ⇒ error:** any undefined reference (missing env var or typo) throws `TemplateError`; the endpoint returns HTTP 400 `{ code: 'NOT_CONFIGURED' }` naming the variable. This is enforced by `strictVariables` (with `ownPropertyOnly`, a missing key on the `env` object also throws — the spec's Proxy fallback proved unnecessary; the test in Task 1 confirms it).
 - **URL encoding:** the URL is no longer auto-encoded. Query-string values must use `{{ value | url_encode }}` (form-encoding: space → `+`, `/` → `%2F`).
-- **Server-side only:** do not touch `interface.vue`, `apply-mappings.ts`, or any i18n. No new user-facing strings.
+- **Request side (Tasks 1–3):** server-only; does not touch `interface.vue`, `apply-mappings.ts`, or any i18n, and adds no new user-facing runtime strings.
+- **Response side (Task 4):** `apply-mappings.ts` gains opt-in Liquid rendering via a **lenient**, synchronous engine (`strictVariables: false`, `parseAndRenderSync`). `resolveMappings` stays synchronous, so `interface.vue` and i18n are untouched. A source is treated as a template only when it contains `{{` or `{%`; plain dot-paths keep their current native-type extraction.
 - **Imports:** ES modules; local imports carry the `.js` extension (e.g. `./liquid.js`).
 - **Language:** all option `note`/`placeholder` copy and README text in English (matches existing code).
 - **Tests:** Vitest unit tests only, co-located as `*.test.ts`. `npm run test` runs `vitest run`.
@@ -531,6 +532,233 @@ git commit -m "docs: document Liquid templating in option notes and README"
 
 ---
 
+### Task 4: Response-side field-mapping templating
+
+**Files:**
+- Modify: `src/utils/liquid.ts` (add `lenientEngine`, `renderTemplateSync`, `isTemplate`)
+- Test: `src/utils/liquid.test.ts` (add helper tests)
+- Modify: `src/utils/apply-mappings.ts` (branch on `isTemplate`)
+- Test: `src/utils/apply-mappings.test.ts` (add template cases)
+- Modify: `src/api-autofill-input/index.ts` (Field Mappings note)
+- Modify: `README.md` (Field Mappings templating note)
+
+**Interfaces:**
+- Consumes (from Task 1): the `Liquid` import already at the top of `liquid.ts`; `getByPath` (existing, from `json-path.js`).
+- Produces:
+  - `function isTemplate(src: string): boolean`
+  - `function renderTemplateSync(src: string, scope: object): string`
+  - `resolveMappings(data: unknown, mappings: Mapping[]): FieldUpdate[]` — signature unchanged (stays synchronous).
+
+- [ ] **Step 1: Add failing tests for the response-side helpers**
+
+In `src/utils/liquid.test.ts`, change the import line:
+```ts
+import { renderTemplate, TemplateError } from './liquid.js';
+```
+to:
+```ts
+import { renderTemplate, renderTemplateSync, isTemplate, TemplateError } from './liquid.js';
+```
+
+Then append these two blocks at the end of the file (after the existing `describe('renderTemplate', …)` block's closing `});`):
+```ts
+describe('isTemplate', () => {
+  it('detects Liquid output and tag syntax', () => {
+    expect(isTemplate('{{ x }}')).toBe(true);
+    expect(isTemplate('{% if x %}a{% endif %}')).toBe(true);
+  });
+
+  it('is false for a plain dot-path', () => {
+    expect(isTemplate('data.city')).toBe(false);
+  });
+});
+
+describe('renderTemplateSync', () => {
+  it('applies a filter from scope', () => {
+    expect(renderTemplateSync('{{ a | upcase }}', { a: 'hi' })).toBe('HI');
+  });
+
+  it('renders an undefined variable as empty string (lenient)', () => {
+    expect(renderTemplateSync('{{ missing }}', {})).toBe('');
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run:
+```bash
+npx vitest run src/utils/liquid.test.ts
+```
+Expected: FAIL — `renderTemplateSync` and `isTemplate` are not exported yet.
+
+- [ ] **Step 3: Add the helpers to `src/utils/liquid.ts`**
+
+Append to the end of `src/utils/liquid.ts` (the `Liquid` class is already imported at the top):
+```ts
+const lenientEngine = new Liquid({ strictVariables: false });
+
+export function isTemplate(src: string): boolean {
+  return /\{\{|\{%/.test(src);
+}
+
+export function renderTemplateSync(src: string, scope: object): string {
+  return lenientEngine.parseAndRenderSync(src, scope);
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run:
+```bash
+npx vitest run src/utils/liquid.test.ts
+```
+Expected: PASS — all 11 tests (7 from Task 1 + 4 new) green.
+
+- [ ] **Step 5: Add failing tests for templated mappings**
+
+In `src/utils/apply-mappings.test.ts`, insert these `it` blocks immediately before the closing `});` of the existing `describe('resolveMappings', …)` block:
+```ts
+  it('renders a Liquid-template source with a filter', () => {
+    expect(
+      resolveMappings({ name: 'john' }, [{ field_source: '{{ name | upcase }}', field_target: 'x' }]),
+    ).toEqual([{ field: 'x', value: 'JOHN' }]);
+  });
+
+  it('joins two response fields in one template', () => {
+    expect(
+      resolveMappings({ first: 'Ada', last: 'Lovelace' }, [
+        { field_source: '{{ first }} {{ last }}', field_target: 'full' },
+      ]),
+    ).toEqual([{ field: 'full', value: 'Ada Lovelace' }]);
+  });
+
+  it('keeps a partially-rendered template', () => {
+    expect(
+      resolveMappings({ first: 'Ada' }, [{ field_source: '{{ first }} {{ last }}', field_target: 'x' }]),
+    ).toEqual([{ field: 'x', value: 'Ada ' }]);
+  });
+
+  it('skips a template that renders empty (all vars missing)', () => {
+    expect(resolveMappings({}, [{ field_source: '{{ nope }}', field_target: 'x' }])).toEqual([]);
+  });
+
+  it('skips a malformed template without throwing', () => {
+    expect(resolveMappings({ a: 'x' }, [{ field_source: '{{ a', field_target: 'x' }])).toEqual([]);
+  });
+
+  it('handles raw paths and templates together', () => {
+    const data = { name: 'john', city: 'NY' };
+    const mappings = [
+      { field_source: 'name', field_target: 'name' },
+      { field_source: '{{ city | upcase }}', field_target: 'city_uc' },
+    ];
+    expect(resolveMappings(data, mappings)).toEqual([
+      { field: 'name', value: 'john' },
+      { field: 'city_uc', value: 'NY' },
+    ]);
+  });
+```
+
+- [ ] **Step 6: Run the test to verify it fails**
+
+Run:
+```bash
+npx vitest run src/utils/apply-mappings.test.ts
+```
+Expected: FAIL — the current `resolveMappings` treats `{{ name | upcase }}` as a dot-path, `getByPath` returns `undefined`, and those rows are skipped, so the new assertions fail.
+
+- [ ] **Step 7: Implement the template branch in `src/utils/apply-mappings.ts`**
+
+Replace the entire contents of `src/utils/apply-mappings.ts`:
+```ts
+import { getByPath } from './json-path.js';
+import { isTemplate, renderTemplateSync } from './liquid.js';
+
+export interface Mapping {
+  field_source: string;
+  field_target: string;
+}
+
+export interface FieldUpdate {
+  field: string;
+  value: unknown;
+}
+
+export function resolveMappings(data: unknown, mappings: Mapping[]): FieldUpdate[] {
+  const updates: FieldUpdate[] = [];
+  const scope = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+
+  for (const mapping of mappings ?? []) {
+    if (!mapping?.field_target || !mapping?.field_source) continue;
+
+    if (isTemplate(mapping.field_source)) {
+      let rendered: string;
+      try {
+        rendered = renderTemplateSync(mapping.field_source, scope);
+      } catch {
+        // Malformed template: skip only this mapping, never break the autofill.
+        continue;
+      }
+      if (rendered === '') continue;
+      updates.push({ field: mapping.field_target, value: rendered });
+      continue;
+    }
+
+    const value = getByPath(data, mapping.field_source);
+    if (value === null || value === undefined) continue;
+    updates.push({ field: mapping.field_target, value });
+  }
+
+  return updates;
+}
+```
+
+- [ ] **Step 8: Run the test to verify it passes**
+
+Run:
+```bash
+npx vitest run src/utils/apply-mappings.test.ts
+```
+Expected: PASS — the 5 original tests plus the 6 new tests are green.
+
+- [ ] **Step 9: Update the Field Mappings docs (option note + README)**
+
+In `src/api-autofill-input/index.ts`, replace the Field Mappings note:
+```ts
+        note: 'Map a path in the API response (source) to a field in this collection (target).',
+```
+with:
+```ts
+        note: 'Map a path in the API response (source) to a field in this collection (target). Source may also be a Liquid template, e.g. {{ first_name }} {{ last_name }}.',
+```
+
+In `README.md`, replace the Field Mappings paragraph:
+```markdown
+**Field Mappings** is where the response becomes form data. Source paths are read with dot notation from the root of the JSON response, and array indexes work too (`results.0.name`). A mapping whose source path is missing from the response is skipped, leaving that field untouched.
+```
+with:
+```markdown
+**Field Mappings** is where the response becomes form data. Source paths are read with dot notation from the root of the JSON response, and array indexes work too (`results.0.name`). A mapping whose source path is missing from the response is skipped, leaving that field untouched.
+
+A source containing `{{ … }}` is instead rendered as a [Liquid](https://liquidjs.com) template against the response — combine or reformat fields with filters, e.g. `{{ first_name }} {{ last_name }}` or `{{ price | times: 1.1 }}`. Missing fields render empty (the row is skipped if the whole result is empty), and a templated source always produces text, whereas a plain dot-path keeps the response value's native type.
+```
+
+- [ ] **Step 10: Run the full suite and build, then commit**
+
+Run:
+```bash
+npm run test && npm run build
+```
+Expected: all Vitest tests pass; `directus-extension build` completes without errors (this confirms `dist/app.js` bundles LiquidJS cleanly).
+
+```bash
+git add -A
+git commit -m "feat: support Liquid templates in field-mapping sources"
+```
+
+---
+
 ## Self-Review
 
 **1. Spec coverage:**
@@ -544,9 +772,13 @@ git commit -m "docs: document Liquid templating in option notes and README"
 - `json` filter closes the documented body limitation → Task 3 Step 6. ✓
 - `liquidjs ^10.27.2` dependency → Task 1 Step 1. ✓
 - Tests: `liquid.test.ts` (filters, scope, strict) + rewritten `request-builder.test.ts` → Tasks 1–2. ✓
-- README updates → Task 3. ✓
-- Out of scope (response-side templating, custom filters) → untouched; no task, correct. ✓
+- README updates (request side) → Task 3. ✓
+- Response-side opt-in templating (`isTemplate` detection, lenient sync render, skip-on-empty, skip malformed, type note) → Task 4. ✓
+- Response engine is lenient/synchronous (`strictVariables: false`, `parseAndRenderSync`); `interface.vue` untouched → Task 4 Step 3/7. ✓
+- Field Mappings note + README note → Task 4 Step 9. ✓
+- App bundle now carries LiquidJS (`dist/app.js` build check) → Task 4 Step 10. ✓
+- Out of scope (custom filters, exposing `value` to response templates) → untouched; no task, correct. ✓
 
 **2. Placeholder scan:** No TBD/TODO. Every code and doc step shows exact content. ✓
 
-**3. Type consistency:** `renderTemplate(src, scope)`, `TemplateScope { value, env }`, `EnvRecord`, and `TemplateError { variableName? }` are defined in Task 1 and consumed with identical names/signatures in Task 2 (`request-builder.ts` and the endpoint). `buildRequest` is `async … Promise<BuiltRequest>` in both its definition (Task 2 Step 3) and its call site (Task 2 Step 5, awaited). ✓
+**3. Type consistency:** `renderTemplate(src, scope)`, `TemplateScope { value, env }`, `EnvRecord`, and `TemplateError { variableName? }` are defined in Task 1 and consumed with identical names/signatures in Task 2 (`request-builder.ts` and the endpoint). `buildRequest` is `async … Promise<BuiltRequest>` in both its definition (Task 2 Step 3) and its call site (Task 2 Step 5, awaited). `isTemplate(src)` and `renderTemplateSync(src, scope)` are added to `liquid.ts` in Task 4 Step 3 and consumed with matching signatures in `apply-mappings.ts` (Task 4 Step 7); `resolveMappings` keeps its synchronous `(data, mappings) => FieldUpdate[]` signature, so its `interface.vue` call site is unaffected. ✓

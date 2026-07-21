@@ -29,6 +29,12 @@ filters (`upcase`, `date`, `url_encode`, `json`, …) across all three request
 surfaces. LiquidJS's built-in `json` filter directly closes the documented body
 limitation.
 
+The same engine is additionally offered on the **response side**: a field mapping's
+source may be a Liquid template, so response values can be combined or reformatted
+before they fill sibling fields (e.g. `{{ first_name }} {{ last_name }}`). This runs
+in the browser, adding LiquidJS to the app bundle — an accepted trade-off (see
+Decisions).
+
 ## Decisions (settled)
 
 1. **Scope of Liquid:** all three surfaces — URL, headers, and body — rendered by a
@@ -41,8 +47,25 @@ limitation.
    surfaced to the user as `NOT_CONFIGURED`, naming the variable. This preserves the
    current "Server env var not set: X" diagnostic and additionally catches template
    typos.
-4. **Placement:** server-side only (the endpoint already performs request building).
-   No client/app-bundle impact — LiquidJS lands only in `dist/api.js`.
+4. **Placement:** request-side rendering is server-side (the endpoint already builds
+   the request); response-side rendering is client-side (the interface resolves
+   mappings). LiquidJS therefore ships in **both** `dist/api.js` and `dist/app.js` —
+   the app bundle grows by the LiquidJS footprint (tens of KB gzipped). Accepted for
+   the response-formatting capability.
+5. **Response-side templating (opt-in):** a field mapping's **Source path** may be a
+   Liquid template. Detection is syntactic — a source containing `{{` or `{%` is
+   rendered with Liquid against the response object; any other source keeps the
+   existing raw dot-path extraction (`getByPath`), preserving native types and full
+   backward compatibility.
+6. **Response rendering is lenient and synchronous:** the response engine uses
+   `strictVariables: false` and `parseAndRenderSync`, so a missing response field
+   renders empty instead of throwing, and `resolveMappings` stays synchronous
+   (`interface.vue` is untouched). An empty rendered result is skipped, and a
+   template *syntax* error skips only that one mapping — mirroring today's "missing
+   source path is skipped, field untouched" behavior.
+7. **Templated output is always a string.** Raw dot-path sources preserve native
+   types (number, boolean, object); a Liquid-templated source always yields a string.
+   Configurators opt into that by writing a template.
 
 ## Architecture
 
@@ -79,6 +102,15 @@ limitation.
   variable name, and rethrows as `TemplateError`. Non-undefined render errors
   (e.g. malformed template syntax) also surface as `TemplateError` (without a
   `variableName`) so the endpoint can report them cleanly rather than 500-ing.
+
+- **Response-side helpers (added for Task 4):**
+  - `lenientEngine` — a second `Liquid` instance configured `{ strictVariables: false }`.
+  - `renderTemplateSync(src: string, scope: object): string` — renders with
+    `lenientEngine.parseAndRenderSync`; undefined variables become empty strings.
+    Throws only on a template *syntax* error, which the caller catches to skip a
+    single mapping. Synchronous, so client callers stay synchronous.
+  - `isTemplate(src: string): boolean` — `true` when `src` contains `{{` or `{%`.
+    Used to choose raw-path vs. Liquid rendering.
 
 ### Removed: `src/utils/template.ts` and `src/utils/template.test.ts`
 
@@ -127,7 +159,25 @@ documents Liquid:
 - **Request Body (JSON):** `POST only. Supports Liquid — use {{ value | json }} to safely JSON-encode the typed value.`
 
 The placeholder for the URL option is updated to
-`https://api.example.com/lookup?q={{ value | url_encode }}`.
+`https://api.example.com/lookup?q={{ value | url_encode }}`. The **Field Mappings**
+option note gains a line noting the Source path may also be a Liquid template.
+
+### Changed: `src/utils/apply-mappings.ts` (response-side templating)
+
+`resolveMappings(data, mappings)` stays synchronous and keeps raw extraction as the
+default. For each mapping it branches on `isTemplate(mapping.field_source)`:
+
+- **Raw path** (no `{{`/`{%`): unchanged — `getByPath(data, field_source)`, skip when
+  `null`/`undefined`, push the native value.
+- **Liquid template:** render with `renderTemplateSync(field_source, scope)`, where
+  `scope` is the response object (`data` when it is a non-null object, else `{}`).
+  Wrapped in `try/catch` — a syntax error skips just that mapping. Skip when the
+  rendered string is empty; otherwise push the string value.
+
+The scope exposes the response object's own keys — e.g. `{{ logradouro | upcase }}`
+or `{{ street }}, {{ city }}`. The typed input value is intentionally not in scope
+(YAGNI; avoids collision with a response key named `value`). `interface.vue` is
+untouched because `resolveMappings` remains synchronous.
 
 ## Data flow (unchanged except rendering)
 
@@ -139,7 +189,7 @@ user types → interface.vue debounce → POST /api-autofill/search { collection
       → renderTemplate(header, { value, env })  (per header)
       → renderTemplate(body,   { value, env })  (POST only)
   → fetch(upstream) → return raw JSON `data` to client
-  → client resolveMappings(data, mappings)            ← UNCHANGED, out of scope
+  → client resolveMappings(data, mappings)            ← raw path OR Liquid (sync, lenient)
 ```
 
 ## Error handling
@@ -205,6 +255,21 @@ pure-JS engine used only at runtime on the server.
 - header `{{ env.VAR }}` resolves from env
 - a missing env var referenced anywhere throws `TemplateError`
 
+**Extended `src/utils/liquid.test.ts` (response-side helpers):**
+
+- `isTemplate` is `true` for `{{ x }}` and `{% if %}`, `false` for `data.city`
+- `renderTemplateSync` applies a filter (`{{ a | upcase }}`) and returns `''` for an
+  undefined variable (lenient) without throwing
+
+**Extended `src/utils/apply-mappings.test.ts`:**
+
+- a raw dot-path source still returns the native value and skips missing paths
+  (existing behavior preserved)
+- a `{{ ... }}` source is rendered with a filter (`{{ name | upcase }}`)
+- a template joining two fields (`{{ a }}-{{ b }}`) yields the combined string
+- a template that renders empty (all vars missing) is skipped
+- a malformed template (`{{ a`) skips only that mapping and does not throw
+
 **Removed:** `src/utils/template.test.ts`.
 
 ## Verification point (resolve during implementation)
@@ -221,9 +286,8 @@ enforces it.
 
 ## Out of scope
 
-- **Response → target-field templating** (client-side `apply-mappings.ts`).
-  Explicitly deferred; the user rated it low value. `resolveMappings` and its raw
-  dot-path extraction are untouched.
 - **Custom Liquid filters.** Built-in filters cover the current need. Registering
   domain-specific filters (e.g. CPF/CNPJ formatting) can be added later on the shared
-  engine instance without changing this design.
+  engine instances without changing this design.
+- **Exposing the typed input value to response-side templates.** Response templates
+  see only the response object. Adding `value` to that scope can come later if needed.

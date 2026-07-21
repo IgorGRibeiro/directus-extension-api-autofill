@@ -31,4 +31,44 @@ describe('resolveMappings', () => {
       { field: 'x', value: 0 },
     ]);
   });
+
+  it('renders a Liquid-template source with a filter', () => {
+    expect(
+      resolveMappings({ name: 'john' }, [{ field_source: '{{ name | upcase }}', field_target: 'x' }]),
+    ).toEqual([{ field: 'x', value: 'JOHN' }]);
+  });
+
+  it('joins two response fields in one template', () => {
+    expect(
+      resolveMappings({ first: 'Ada', last: 'Lovelace' }, [
+        { field_source: '{{ first }} {{ last }}', field_target: 'full' },
+      ]),
+    ).toEqual([{ field: 'full', value: 'Ada Lovelace' }]);
+  });
+
+  it('keeps a partially-rendered template', () => {
+    expect(
+      resolveMappings({ first: 'Ada' }, [{ field_source: '{{ first }} {{ last }}', field_target: 'x' }]),
+    ).toEqual([{ field: 'x', value: 'Ada ' }]);
+  });
+
+  it('skips a template that renders empty (all vars missing)', () => {
+    expect(resolveMappings({}, [{ field_source: '{{ nope }}', field_target: 'x' }])).toEqual([]);
+  });
+
+  it('skips a malformed template without throwing', () => {
+    expect(resolveMappings({ a: 'x' }, [{ field_source: '{{ a', field_target: 'x' }])).toEqual([]);
+  });
+
+  it('handles raw paths and templates together', () => {
+    const data = { name: 'john', city: 'NY' };
+    const mappings = [
+      { field_source: 'name', field_target: 'name' },
+      { field_source: '{{ city | upcase }}', field_target: 'city_uc' },
+    ];
+    expect(resolveMappings(data, mappings)).toEqual([
+      { field: 'name', value: 'john' },
+      { field: 'city_uc', value: 'NY' },
+    ]);
+  });
 });

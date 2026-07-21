@@ -34,3 +34,17 @@ export async function renderTemplate(src: string, scope: TemplateScope): Promise
     throw new TemplateError(message, extractVariableName(err));
   }
 }
+
+// Response-side templating (field-mapping sources) uses a separate, lenient
+// engine: undefined variables render as an empty string instead of throwing,
+// since a response field being absent is an expected, non-fatal case here —
+// the opposite policy from the strict request-side `engine` above.
+const lenientEngine = new Liquid({ strictVariables: false });
+
+export function isTemplate(src: string): boolean {
+  return /\{\{|\{%/.test(src);
+}
+
+export function renderTemplateSync(src: string, scope: object): string {
+  return lenientEngine.parseAndRenderSync(src, scope);
+}

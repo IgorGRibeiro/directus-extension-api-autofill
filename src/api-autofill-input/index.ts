@@ -114,7 +114,7 @@ export default defineInterface({
       meta: {
         width: 'full',
         interface: 'list',
-        note: 'Map a path in the API response (source) to a field in this collection (target).',
+        note: 'Map a path in the API response (source) to a field in this collection (target). Source may also be a Liquid template, e.g. {{ first_name }} {{ last_name }}.',
         options: {
           addLabel: 'Add mapping',
           template: '{{ field_source }} → {{ field_target }}',

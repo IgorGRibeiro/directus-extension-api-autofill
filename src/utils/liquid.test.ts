@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderTemplate, TemplateError } from './liquid.js';
+import { renderTemplate, renderTemplateSync, isTemplate, TemplateError } from './liquid.js';
 
 describe('renderTemplate', () => {
   it('renders a plain value from scope', async () => {
@@ -33,5 +33,26 @@ describe('renderTemplate', () => {
     const err = await renderTemplate('{{ env.NOPE }}', { value: 'x', env: {} }).catch((e) => e);
     expect(err).toBeInstanceOf(TemplateError);
     expect(err.variableName).toContain('NOPE');
+  });
+});
+
+describe('isTemplate', () => {
+  it('detects Liquid output and tag syntax', () => {
+    expect(isTemplate('{{ x }}')).toBe(true);
+    expect(isTemplate('{% if x %}a{% endif %}')).toBe(true);
+  });
+
+  it('is false for a plain dot-path', () => {
+    expect(isTemplate('data.city')).toBe(false);
+  });
+});
+
+describe('renderTemplateSync', () => {
+  it('applies a filter from scope', () => {
+    expect(renderTemplateSync('{{ a | upcase }}', { a: 'hi' })).toBe('HI');
+  });
+
+  it('renders an undefined variable as empty string (lenient)', () => {
+    expect(renderTemplateSync('{{ missing }}', {})).toBe('');
   });
 });

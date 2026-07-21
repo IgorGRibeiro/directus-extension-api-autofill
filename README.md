@@ -58,6 +58,8 @@ The **Request URL**, **Headers**, and **Request Body** are rendered with the [Li
 
 **Field Mappings** is where the response becomes form data. Source paths are read with dot notation from the root of the JSON response, and array indexes work too (`results.0.name`). A mapping whose source path is missing from the response is skipped, leaving that field untouched.
 
+A source containing `{{ … }}` is instead rendered as a [Liquid](https://liquidjs.com) template against the response — combine or reformat fields with filters, e.g. `{{ first_name }} {{ last_name }}` or `{{ price | times: 1.1 }}`. Missing fields render empty (the row is skipped if the whole result is empty), and a templated source always produces text, whereas a plain dot-path keeps the response value's native type.
+
 ### 2. API Autofill Endpoint (`api-autofill`)
 
 Registers `POST /api-autofill/search`. It has no options and requires no setup — the interface calls it automatically.

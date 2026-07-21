@@ -10,7 +10,7 @@ Typing a postal code fills street, city and state. Typing a tax ID fills a compa
 - **Liquid templating** — shape the outbound request (URL, headers, body) with [Liquid](https://liquidjs.com) filters like `upcase`, `json`, and `url_encode`
 - **Field mapping** — map any dot-path in the API response (`data.address.city`) to any field in the collection
 - **Server-side proxy** — the browser never sees the target URL, headers, or credentials
-- **Secrets stay on the server** — reference environment variables with `{{env.VAR}}`; they are resolved inside the Directus process
+- **Secrets stay on the server** — reference environment variables with `{{ env.VAR }}`; they are resolved inside the Directus process
 - **Permission-aware** — every lookup runs under the requesting user's own field permissions
 - **Debounced** — configurable delay (default 500 ms) with duplicate-search suppression
 - **Trigger regex** — fire the lookup only when the input matches a pattern, so partial typing costs nothing
@@ -54,7 +54,7 @@ An interface for `string` and `text` fields. Apply it to the field the user type
 | Trigger Regex        | Optional. The lookup only fires when the typed value matches this pattern — e.g. `^\d{8}$` for an 8-digit code                   |
 | Field Mappings       | Repeatable pairs: **Source path** is a dot-path into the API response (`data.city`), **Target field** is a field in this collection |
 
-The **Request URL**, **Headers**, and **Request Body** are rendered with the [Liquid](https://liquidjs.com) template engine. Two variables are in scope: `value` (the typed text) and `env` (server environment variables). Use Liquid filters to format what you send — for example `{{ value | upcase }}`, `{{ value | url_encode }}` in a query string, or `{{ value | json }}` to embed the value safely in a JSON body. Referencing a variable that is not set — a missing env var or a typo — aborts the lookup with a configuration error.
+The **Request URL**, **Headers**, and **Request Body** are rendered with the [Liquid](https://liquidjs.com) template engine. Two variables are in scope: `value` (the typed text) and `env` (server environment variables). Use Liquid filters to format what you send — for example `{{ value | upcase }}`, `{{ value | url_encode }}` in a query string, or `{{ value | json }}` to embed the value safely in a JSON body. Referencing a variable that is not set — a missing env var or a typo — aborts the lookup with a configuration error. Because the whole surface is now parsed as Liquid, any other `{{ … }}` or `{% … %}` already present in a URL, header, or body value is interpreted too, not left as literal text; wrap literal `{{` or `}}` you want sent as-is to the upstream in `{% raw %}…{% endraw %}`.
 
 **Field Mappings** is where the response becomes form data. Source paths are read with dot notation from the root of the JSON response, and array indexes work too (`results.0.name`). A mapping whose source path is missing from the response is skipped, leaving that field untouched.
 

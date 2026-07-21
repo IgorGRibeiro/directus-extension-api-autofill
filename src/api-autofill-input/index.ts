@@ -69,7 +69,7 @@ export default defineInterface({
           template: '{{ name }}',
           fields: [
             { field: 'name', type: 'string', name: 'Name', meta: { width: 'half', interface: 'input', options: { placeholder: 'Authorization' } } },
-            { field: 'value', type: 'string', name: 'Value', meta: { width: 'half', interface: 'input', options: { placeholder: 'Bearer {{env.API_TOKEN}}' } } },
+            { field: 'value', type: 'string', name: 'Value', meta: { width: 'half', interface: 'input', options: { placeholder: 'Bearer {{ env.API_TOKEN }}' } } },
           ],
         },
       },

@@ -41,8 +41,8 @@ export default defineInterface({
       meta: {
         width: 'full',
         interface: 'input',
-        note: 'Supports {{value}} (the typed text) and {{env.VAR}} (resolved on the server).',
-        options: { placeholder: 'https://api.example.com/lookup?q={{value}}' },
+        note: 'Rendered with Liquid. Variables: {{ value }} (typed text) and {{ env.VAR }} (server env). Not auto-encoded — use {{ value | url_encode }} in query strings.',
+        options: { placeholder: 'https://api.example.com/lookup?q={{ value | url_encode }}' },
       },
     },
     {
@@ -63,7 +63,7 @@ export default defineInterface({
       meta: {
         width: 'full',
         interface: 'list',
-        note: 'Header values support {{value}} and {{env.VAR}}.',
+        note: 'Header values are rendered with Liquid — e.g. Bearer {{ env.API_TOKEN }}.',
         options: {
           addLabel: 'Add header',
           template: '{{ name }}',
@@ -81,7 +81,7 @@ export default defineInterface({
       meta: {
         width: 'full',
         interface: 'input-code',
-        note: 'POST only. Supports {{value}}.',
+        note: 'POST only. Rendered with Liquid — use {{ value | json }} to embed the value as valid JSON.',
         options: { language: 'json' },
         hidden: true,
         conditions: [

@@ -1,7 +1,7 @@
 {
   "name": "@ribertec/directus-extension-api-autofill",
   "description": "General-purpose API autofill interface for Directus: query an external HTTP API on input and fill sibling fields via a source-to-target mapping.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "MIT",
   "author": "@ribertec",
   "icon": "sync",
